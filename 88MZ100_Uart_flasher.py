@@ -7,21 +7,22 @@
 import sys
 import os
 import time
-import serial.tools.list_ports
+import serial
 
-if(len(sys.argv)!=4):
-    print("Example: COM1 read file.bin, or COM1 write file.bin, or COM1 write_flash file.bin")
-    print("Not the right arguments but here are the... please wait...")
-    ports_list = "possible UART ports: "
-    for port in serial.tools.list_ports.comports():
-        ports_list += port.device + " "
-    print(ports_list)
+def print_help():
+    print("Usage: python3 88MZ100_Uart_flasher.py <serial_port> <baud_rate> <command> [filename]")
+    print("Commands: read write write_flash erase_flash")
+    print("Examples: COM1 115200 read file.bin")
+    print("          /dev/ttyUSB0 115200 write file.bin")
     exit()
-    
-usedCom = sys.argv[1] #"COM14"
-read_or_write = sys.argv[2]
-file = sys.argv[3]
-usedBaud = 115200
+
+try:
+    usedCom = sys.argv[1] #"COM14"
+    usedBaud = int(sys.argv[2])
+    cmd = sys.argv[3]
+except:
+    print_help()
+
 serialPort = serial.Serial(usedCom, usedBaud, serial.EIGHTBITS, serial.PARITY_NONE, serial.STOPBITS_ONE, timeout=5)
 print('Using port: {}'.format(usedCom))
 
@@ -147,8 +148,8 @@ def flash_file_flash(filename):
     header += to_byte(0x100000)
     header += to_byte(entry_point)
     header += to_byte(0x4D52564C)
-    filesize+=32
-    data = header+data
+    #filesize+=32
+    #data = header+data
     
     block_size = 80 # bytes per sending
     cur_address = 0
@@ -172,32 +173,49 @@ def flash_erase():
 
 def dump_flash(filename):
     block_size = 128 # bytes per request
+    file = open(filename,"wb+") 
     for x in range(int(0x80000/block_size)):
         send_cmd(read_flash(x*block_size,block_size)) 
         current_block_dump = uart_receive_handler(4+block_size)
-        file = open(filename,"ab+") 
         file.write((''.join(chr(i) for i in current_block_dump[4:])).encode('charmap')) 
-        file.close() 
+    file.close() 
 
-serialPort.write(to_byte(0x3A,1))
-time.sleep(0.4)
-print("Waiting for boot promt, please reset the chip") 
-wait_for_prompt()
-uart_flush()
+def init():
+    serialPort.write(to_byte(0x3A,1))
+    time.sleep(0.4)
+    print("Waiting for boot promt, please reset the chip") 
+    wait_for_prompt()
+    uart_flush()
             
-if(read_or_write=='read'):
+if(cmd=='read'):
+    file = sys.argv[4]
+    init()
     dump_flash('read_' + file)
     
-elif(read_or_write=='write'):
+elif(cmd=='write'):
+    file = sys.argv[4]
+    init()
     flash_file(file)
     
-elif(read_or_write=='write_flash'):
+elif(cmd=='write_flash'):
+    file = sys.argv[4]
+    init()
     flash_file("second_stage_bootloader.bin")
     if(uart_receive_handler(8)[1:].decode('utf-8') == "ATCboot"):
         print("Second stage bootloader started");
         uart_ceck = 0x00
         flash_erase()
         flash_file_flash(file)
+elif(cmd=='erase_flash'):
+    init()
+    flash_file("second_stage_bootloader.bin")
+    if(uart_receive_handler(8)[1:].decode('utf-8') == "ATCboot"):
+        print("Second stage bootloader started");
+        uart_ceck = 0x00
+        flash_erase()
+else:
+    print("no command")
+    print_help()
 
 data_str = ""
 while(1):
